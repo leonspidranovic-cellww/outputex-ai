@@ -6,6 +6,7 @@ import re
 import json
 import requests
 import time
+import os
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify, render_template
 from duckduckgo_search import DDGS
@@ -16,8 +17,10 @@ app = Flask(__name__)
 # =======================================================
 # ВСТАВЬТЕ СВОЙ КЛЮЧ GigaChat (из личного кабинета)
 # =======================================================
-GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS", "")
-
+GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS")
+if not GIGACHAT_CREDENTIALS:
+    raise ValueError("GIGACHAT_CREDENTIALS не установлена! Добавьте её в переменные окружения.")
+    
 # ===== ЧЁРНЫЙ СПИСОК ДОМЕНОВ =====
 BLACKLIST_DOMAINS = [
     'facebook.com', 'support.mozilla.org', 'answers.com',
