@@ -16,7 +16,7 @@ app = Flask(__name__)
 # =======================================================
 # ВСТАВЬТЕ СВОЙ КЛЮЧ GigaChat (из личного кабинета)
 # =======================================================
-GIGACHAT_CREDENTIALS = "MDFhMDExMjAtZGQ5MC03NDgyLTg0YTgtMDY4NTBkOWRiNjI2OmM3NDY1YjYwLWQ3NDYtNGY2Ny1iOGFjLWRlNjUxMzNmZjgwMA=="
+GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS", "")
 
 # ===== ЧЁРНЫЙ СПИСОК ДОМЕНОВ =====
 BLACKLIST_DOMAINS = [
