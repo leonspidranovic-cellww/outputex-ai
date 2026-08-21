@@ -15,7 +15,7 @@ app = Flask(__name__)
 GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS")
 if not GIGACHAT_CREDENTIALS:
     raise ValueError("GIGACHAT_CREDENTIALS не установлена! Добавьте её в переменные окружения.")
-    
+    GIGACHAT_SCOPE = "GIGACHAT_API_PERS"
 # ===== ЧЁРНЫЙ СПИСОК ДОМЕНОВ =====
 BLACKLIST_DOMAINS = [
     'facebook.com', 'support.mozilla.org', 'answers.com',
