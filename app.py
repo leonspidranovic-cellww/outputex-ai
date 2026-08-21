@@ -1,12 +1,7 @@
-#Copyright (c) [2026] [Пырьев Максим Владимирович]
-#This code is licensed under the MIT License.
-# See the LICENSE file for details.
-
+import os
 import re
 import json
 import requests
-import time
-import os
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify, render_template
 from duckduckgo_search import DDGS
@@ -15,7 +10,7 @@ from gigachat import GigaChat
 app = Flask(__name__)
 
 # =======================================================
-# ВСТАВЬТЕ СВОЙ КЛЮЧ GigaChat (из личного кабинета)
+# КЛЮЧИ
 # =======================================================
 GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS")
 if not GIGACHAT_CREDENTIALS:
@@ -136,11 +131,50 @@ def search_sources(original_question, max_results=10):
                 existing_urls.add(r['href'])
     return results[:max_results]
 
-# ===== ГЕНЕРАЦИЯ ОТВЕТА С MARKDOWN =====
-def generate_ai_answer(question, sources):
-    if not sources:
-        return "Не нашёл информации, но давай подумаем вместе! 😊 Может, уточним вопрос?"
+def is_simple_question(text):
+    """Определяет, является ли вопрос простым (коротким или приветствием)"""
+    text = text.lower().strip()
+    simple_phrases = ['привет', 'здравствуй', 'добрый день', 'как дела', 'кто ты', 'что ты умеешь', 'пока']
+    if any(p in text for p in simple_phrases):
+        return True
+    # Если меньше 5 слов – считаем простым
+    if len(text.split()) <= 5:
+        return True
+    return False
 
+def generate_ai_answer(question, sources, deep=False):
+    """Генерирует ответ с учётом источников и глубины мышления"""
+    # Если вопрос простой – отвечаем кратко без источников
+    if is_simple_question(question):
+        try:
+            with GigaChat(
+                credentials=GIGACHAT_CREDENTIALS,
+                scope=GIGACHAT_SCOPE,
+                model="GigaChat-3-Ultra",
+                verify_ssl_certs=False,
+                base_url="https://api.giga.chat/v1"
+            ) as client:
+                response = client.chat.create(question)
+                return response.messages[0].content[0].text
+        except Exception as e:
+            return f"Привет! Я OUTPUTEX AI. Чем могу помочь? (Ошибка: {e})"
+
+    # Если нет источников, но вопрос не простой – даём общий ответ
+    if not sources:
+        try:
+            with GigaChat(
+                credentials=GIGACHAT_CREDENTIALS,
+                scope=GIGACHAT_SCOPE,
+                model="GigaChat-3-Ultra",
+                verify_ssl_certs=False,
+                base_url="https://api.giga.chat/v1"
+            ) as client:
+                response = client.chat.create(question)
+                return response.messages[0].content[0].text
+        except Exception as e:
+            return f"Не нашёл информации, но давай подумаем вместе! 😊 (Ошибка: {e})"
+
+    # Формируем контекст из источников
     context_parts = []
     for i, s in enumerate(sources, 1):
         text = s['body']
@@ -149,25 +183,32 @@ def generate_ai_answer(question, sources):
         context_parts.append(f"Источник {i}: {s['title']}\n{text}\nСсылка: {s['href']}")
     context = "\n\n".join(context_parts)
 
+    # Выбираем стиль в зависимости от deep
+    if deep:
+        style_instruction = (
+            "Дай глубокий, аналитический ответ. Используй структуры: таблицы, списки, сравнения. "
+            "Покажи разные точки зрения."
+        )
+    else:
+        style_instruction = (
+            "Ответь развёрнуто, но по делу. Используй списки и выделения для ключевых пунктов."
+        )
+
     prompt = f"""
-Ты — OUTPUTEX AI, живой собеседник и эксперт. Твоя задача — помогать пользователю не только словами, но и **наглядными структурами**: командами, кодом, цитатами, таблицами, списками.
+Ты — OUTPUTEX AI, живой собеседник и эксперт. Твоя задача — помогать пользователю наглядно: командами, кодом, цитатами, таблицами, списками.
 
-**ВАЖНО: используй Markdown-разметку для оформления:**
-- Для **команд** и **кода** используй блоки с тройными обратными кавычками и указанием языка (например, ```bash, ```python, ```cmd).
-- Для **цитат** используй `>` в начале строки.
-- Для **списков** используй `-` или `1.`, `2.`.
-- Для **таблиц** — Markdown-синтаксис таблиц.
-- Для **выделения важного** — `**жирный**` или `*курсив*`.
+**ВАЖНО: используй Markdown-разметку:**
+- Для **команд** и **кода** – блоки с ```bash, ```python, ```cmd.
+- Для **цитат** – `>` в начале строки.
+- Для **списков** – `-` или `1.`, `2.`.
+- Для **таблиц** – Markdown-синтаксис.
+- Для **выделения** – `**жирный**` или `*курсив*`.
 
-Твой стиль:
-- Объясняй просто, но со структурированными элементами.
-- Если вопрос подразумевает инструкцию — давай чёткие шаги, а не просто текст.
-- Если нужно показать код — показывай код с пояснениями.
-- Если есть цитата — оформляй её как цитату.
+{style_instruction}
 
-Вот вопрос пользователя: {question}
+Вопрос пользователя: {question}
 
-Информация из интернета (используй её, но перескажи и дополни структурами):
+Информация из интернета (используй её, перескажи и дополни структурами):
 {context}
 
 Ответь так, чтобы было удобно читать: с заголовками, блоками кода, списками и выделениями.
@@ -176,7 +217,7 @@ def generate_ai_answer(question, sources):
     try:
         with GigaChat(
             credentials=GIGACHAT_CREDENTIALS,
-            scope="GIGACHAT_API_PERS",
+            scope=GIGACHAT_SCOPE,
             model="GigaChat-3-Ultra",
             verify_ssl_certs=False,
             base_url="https://api.giga.chat/v1"
@@ -186,31 +227,38 @@ def generate_ai_answer(question, sources):
     except Exception as e:
         return f"Ой, что-то пошло не так: {e}"
 
-# ===== Маршруты Flask =====
+# =======================================================
+# МАРШРУТЫ
+# =======================================================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/ask', methods=['POST'])
-def ask():
+@app.route('/api/chat', methods=['POST'])
+def chat():
     data = request.get_json()
-    question = data.get('question', '').strip()
+    question = data.get('message', '').strip()
+    search_enabled = data.get('search', False)
+    deep_enabled = data.get('deep', False)
+
     if not question:
         return jsonify({"error": "Введите вопрос"}), 400
 
-    sources = search_sources(question, max_results=10)
-    if not sources:
-        return jsonify({
-            "answer": "По вашему запросу ничего не найдено. Попробуйте переформулировать вопрос.",
-            "sources": []
-        })
+    # Если поиск включён – ищем источники, иначе – пустой список
+    sources = []
+    if search_enabled:
+        sources = search_sources(question, max_results=10)
 
-    answer_text = generate_ai_answer(question, sources)
+    answer_text = generate_ai_answer(question, sources, deep_enabled)
 
-    source_list = [{"title": s["title"], "url": s["href"]} for s in sources if s.get("href") and s["href"] != "#"]
+    # Формируем ответ для фронта
+    source_list = []
+    for s in sources:
+        if s.get('href') and s['href'] != '#':
+            source_list.append({"title": s.get('title', 'Источник'), "url": s['href']})
 
     return jsonify({
-        "answer": answer_text,
+        "reply": answer_text,
         "sources": source_list
     })
 
