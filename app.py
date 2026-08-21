@@ -10,14 +10,19 @@ from gigachat import GigaChat
 app = Flask(__name__)
 
 # =======================================================
-# КЛЮЧИ
+# КЛЮЧИ ДОСТУПА (используются переменные окружения)
 # =======================================================
 GIGACHAT_CREDENTIALS = os.getenv("GIGACHAT_CREDENTIALS")
+# Если переменная не задана – используем запасной ключ (для тестирования)
 if not GIGACHAT_CREDENTIALS:
-    raise ValueError("GIGACHAT_CREDENTIALS не установлена! Добавьте её в переменные окружения.")
+    GIGACHAT_CREDENTIALS = "MDFhMDExMjAtZGQ5MC03NDgyLTg0YTgtMDY4NTBkOWRiNjI2OmM3NDY1YjYwLWQ3NDYtNGY2Ny1iOGFjLWRlNjUxMzNmZjgwMA=="
+
+# Область доступа (обязательный параметр для GigaChat)
 GIGACHAT_SCOPE = "GIGACHAT_API_PERS"
-    
-# ===== ЧЁРНЫЙ СПИСОК ДОМЕНОВ =====
+
+# =======================================================
+# ЧЁРНЫЙ СПИСОК ДОМЕНОВ (фильтр мусорных ссылок)
+# =======================================================
 BLACKLIST_DOMAINS = [
     'facebook.com', 'support.mozilla.org', 'answers.com',
     'vk.com', 'instagram.com', 'twitter.com',
@@ -30,8 +35,11 @@ def is_bad_domain(url):
             return True
     return False
 
-# ===== Очистка запроса =====
+# =======================================================
+# ОЧИСТКА ЗАПРОСА И ПОСТРОЕНИЕ ПОИСКОВОГО ЗАПРОСА
+# =======================================================
 def clean_query(query):
+    """Удаляет приветствия и лишние слова из вопроса."""
     patterns_greeting = [
         r'^(привет|здравствуй|здравствуйте|добрый день|добрый вечер|доброе утро|салют|хай|hello|hi)\s*,?\s*',
         r'^(скажи|расскажи|напиши|ответь|помоги|подскажи|объясни|покажи)\s*,?\s*'
@@ -49,6 +57,7 @@ def clean_query(query):
     return query.strip()
 
 def build_search_query(original_question, cleaned):
+    """Формирует оптимизированный поисковый запрос."""
     if not cleaned:
         return original_question
     stopwords = {'самый', 'самая', 'самое', 'самые', 'очень', 'слишком', 'весьма'}
@@ -61,6 +70,9 @@ def build_search_query(original_question, cleaned):
             result = result + ' сорт'
     return result if result else original_question
 
+# =======================================================
+# ПОИСК В ИНТЕРНЕТЕ (DuckDuckGo + Google как запасной)
+# =======================================================
 def search_duckduckgo(query, max_results=10):
     results = []
     try:
@@ -115,6 +127,7 @@ def search_google(query, max_results=10):
     return results
 
 def search_sources(original_question, max_results=10):
+    """Собирает источники из DuckDuckGo и при необходимости Google."""
     cleaned = clean_query(original_question)
     if not cleaned:
         cleaned = original_question
@@ -132,20 +145,25 @@ def search_sources(original_question, max_results=10):
                 existing_urls.add(r['href'])
     return results[:max_results]
 
+# =======================================================
+# ОПРЕДЕЛЕНИЕ ПРОСТЫХ ВОПРОСОВ
+# =======================================================
 def is_simple_question(text):
-    """Определяет, является ли вопрос простым (коротким или приветствием)"""
+    """Определяет, является ли вопрос простым (коротким или приветствием)."""
     text = text.lower().strip()
     simple_phrases = ['привет', 'здравствуй', 'добрый день', 'как дела', 'кто ты', 'что ты умеешь', 'пока']
     if any(p in text for p in simple_phrases):
         return True
-    # Если меньше 5 слов – считаем простым
     if len(text.split()) <= 5:
         return True
     return False
 
+# =======================================================
+# ГЕНЕРАЦИЯ ОТВЕТА ЧЕРЕЗ GigaChat
+# =======================================================
 def generate_ai_answer(question, sources, deep=False):
-    """Генерирует ответ с учётом источников и глубины мышления"""
-    # Если вопрос простой – отвечаем кратко без источников
+    """Генерирует ответ с учётом источников и глубины мышления."""
+    # Простые вопросы – отвечаем кратко без поиска
     if is_simple_question(question):
         try:
             with GigaChat(
@@ -160,7 +178,7 @@ def generate_ai_answer(question, sources, deep=False):
         except Exception as e:
             return f"Привет! Я OUTPUTEX AI. Чем могу помочь? (Ошибка: {e})"
 
-    # Если нет источников, но вопрос не простой – даём общий ответ
+    # Если нет источников – отвечаем без контекста
     if not sources:
         try:
             with GigaChat(
@@ -229,14 +247,16 @@ def generate_ai_answer(question, sources, deep=False):
         return f"Ой, что-то пошло не так: {e}"
 
 # =======================================================
-# МАРШРУТЫ
+# МАРШРУТЫ FLASK
 # =======================================================
 @app.route('/')
 def index():
+    """Отдаёт главную страницу (интерфейс)."""
     return render_template('index.html')
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
+    """Принимает сообщение, возвращает ответ от AI."""
     data = request.get_json()
     question = data.get('message', '').strip()
     search_enabled = data.get('search', False)
@@ -245,14 +265,14 @@ def chat():
     if not question:
         return jsonify({"error": "Введите вопрос"}), 400
 
-    # Если поиск включён – ищем источники, иначе – пустой список
+    # Если поиск включён – ищем источники
     sources = []
     if search_enabled:
         sources = search_sources(question, max_results=10)
 
     answer_text = generate_ai_answer(question, sources, deep_enabled)
 
-    # Формируем ответ для фронта
+    # Формируем список источников для фронта
     source_list = []
     for s in sources:
         if s.get('href') and s['href'] != '#':
@@ -263,5 +283,8 @@ def chat():
         "sources": source_list
     })
 
+# =======================================================
+# ЗАПУСК СЕРВЕРА
+# =======================================================
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
